@@ -24,6 +24,14 @@ typedef struct {
     const char *p;
 } reader_t;
 
+// Stack allocation interface.
+void init_reader(reader_t *reader, const char *str)
+{
+    reader->str = str;
+    reader->p = str;
+}
+
+// Heap allocation interface.
 reader_t *create_reader(const char *str)
 {
     reader_t *reader = (reader_t *)malloc(sizeof(reader_t));
@@ -470,15 +478,8 @@ sexp_t *parse_list(reader_t *reader)
     exit(-1);
 }
 
-sexp_t *parse(const char* in)
+sexp_t *parse(reader_t *reader)
 {
-#define RETURN_WITH_DESTROYING_READER(_exp) do { \
-        sexp_t *ret = _exp; \
-        destroy_reader(reader); \
-        return ret; \
-    } while(0)
-
-    reader_t *reader = create_reader(in);
     char c;
 
     while ((c=reader_head(reader))) {
@@ -490,7 +491,7 @@ sexp_t *parse(const char* in)
 
         if (c == '(') {
             reader_next(reader);
-            RETURN_WITH_DESTROYING_READER(parse_list(reader));
+            return parse_list(reader);
         }
 
         if (c == ')') {
@@ -500,15 +501,13 @@ sexp_t *parse(const char* in)
 
         if (c == '"') {
             reader_next(reader);
-            RETURN_WITH_DESTROYING_READER(parse_string(reader));
+            return parse_string(reader);
         }
 
-        RETURN_WITH_DESTROYING_READER(parse_symbol(reader));
+        return parse_symbol(reader);
     }
 
-    RETURN_WITH_DESTROYING_READER(create_nil());
-
-#undef RETURN_WITH_DESTROYING_READER
+    return create_nil();
 }
 
 
@@ -518,7 +517,10 @@ sexp_t *parse(const char* in)
 
 int main()
 {
-    sexp_t *sexp = parse(" (ab\\(c de (f g) \"hi\\\"j\")");
+    reader_t reader;
+    init_reader(&reader, " (ab\\(c de (f g) \"hi\\\"j\")");
+
+    sexp_t *sexp = parse(&reader);
 
     print_sexp(sexp);
     printf("\n");
