@@ -272,19 +272,6 @@ void print_sexp(sexp_t *sexp)
  * read
  */
 
-#define ERROR(_msg) do { \
-        fprintf(stderr, "%s\n", _msg);\
-        exit(EXIT_FAILURE); \
-    } while(0)
-
-#define END_OF_FILE         ERROR("End of file.")
-#define NOT_IMPLEMENTED     ERROR("Not implemented.")
-#define READER_ERROR        ERROR("Reader error.")
-#define UNMATCHED_CLOSE_PARENTHESIS ERROR("Unmatched close parenthesis.")
-#define MUST_NOT_BE_REACHED ERROR("Must not be reached.")
-
-sexp_t *read(FILE *);
-
 bool is_invalid_character(char c)
 {
     return false;
@@ -340,6 +327,19 @@ void nreverse(sexp_t **psexp)
     destroy_sexp(current);
     *psexp = prev;
 }
+
+#define ERROR(_msg) do { \
+        fprintf(stderr, "%s\n", _msg);\
+        exit(EXIT_FAILURE); \
+    } while(0)
+
+#define END_OF_FILE         ERROR("End of file.")
+#define NOT_IMPLEMENTED     ERROR("Not implemented.")
+#define READER_ERROR        ERROR("Reader error.")
+#define UNMATCHED_CLOSE_PARENTHESIS ERROR("Unmatched close parenthesis.")
+#define MUST_NOT_BE_REACHED ERROR("Must not be reached.")
+
+sexp_t *read(FILE *);
 
 sexp_t *read_string(FILE *fp, char c)
 {
