@@ -1,3 +1,3 @@
 # sexp-parser
 
-S-expression parser in palin C.
+S-expression parser in plain C.
