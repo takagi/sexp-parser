@@ -344,14 +344,14 @@ sexp_t *parse_symbol(reader_t *reader)
     char buf[256] = {0};
     int i = 0;
     char c;
-    bool is_escape = false;
+    bool is_escaped = false;
 
     while ((c=reader_head(reader))) {
 
-        if (is_escape) {
+        if (is_escaped) {
             ADD_BUF(buf, i, c);
             reader_next(reader);
-            is_escape = false;
+            is_escaped = false;
             continue;
         }
 
@@ -363,7 +363,7 @@ sexp_t *parse_symbol(reader_t *reader)
 
         if (is_single_escape(c)) {
             reader_next(reader);
-            is_escape = true;
+            is_escaped = true;
             continue;
         }
 
@@ -409,20 +409,20 @@ sexp_t *parse_string(reader_t *reader)
     char buf[256] = {0};
     int i = 0;
     char c;
-    bool is_escape = false;
+    bool is_escaped = false;
 
     while ((c=reader_head(reader))) {
 
-        if (is_escape) {
+        if (is_escaped) {
             ADD_BUF(buf, i, c);
             reader_next(reader);
-            is_escape = false;
+            is_escaped = false;
             continue;
         }
 
         if (is_single_escape(c)) {
             reader_next(reader);
-            is_escape = true;
+            is_escaped = true;
             continue;
         }
 
