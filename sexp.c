@@ -222,7 +222,7 @@ begin:
 
 
 /*
- * sexp
+ * sexp - continued
  */
 
 void destroy_sexp(sexp_t *sexp)
@@ -269,67 +269,56 @@ void print_sexp(sexp_t *sexp)
 
 
 /*
- * parser
+ * read
  */
 
-bool is_whitespace(unsigned char c)
+#define ERROR(_msg) do { \
+        fprintf(stderr, "%s\n", _msg);\
+        exit(EXIT_FAILURE); \
+    } while(0)
+
+#define END_OF_FILE         ERROR("End of file.")
+#define NOT_IMPLEMENTED     ERROR("Not implemented.")
+#define READER_ERROR        ERROR("Reader error.")
+#define UNMATCHED_CLOSE_PARENTHESIS ERROR("Unmatched close parenthesis.")
+#define MUST_NOT_BE_REACHED ERROR("Must not be reached.")
+
+sexp_t *read(FILE *);
+
+bool is_invalid_character(char c)
 {
-    return c == ' ' || c == '\t' || c == '\n';
+    return false;
 }
 
-bool is_terminating(unsigned char c)
+bool is_whitespace(char c)
+{
+    return c == '\t' || c == '\n' || c == '\r' || c == ' ';
+}
+
+bool is_terminating(char c)
 {
     return c == '"' || c == '\'' || c == '(' || c == ')'
         || c == ',' || c == ';'  || c == '`';
 }
 
-bool is_single_escape(unsigned char c)
+bool is_non_terminating(char c)
+{
+    return c == '#';
+}
+
+bool is_macro_character(char c)
+{
+    return is_terminating(c) || is_non_terminating(c);
+}
+
+bool is_single_escape(char c)
 {
     return c == '\\';
 }
 
-sexp_t *parse_symbol(FILE *fp)
+bool is_multi_escape(char c)
 {
-#define ADD_BUF(_buf, _i, _c) do { \
-        _buf[_i++] = _c; \
-        if (_i == 256) { \
-            fprintf(stderr, "Too long token: %s...\n", _buf); \
-            exit(-1); \
-        } \
-    } while(0)
-
-    char buf[256] = {0};
-    int i = 0;
-    char c;
-    bool is_escaped = false;
-
-    while ((c=fgetc(fp)) != EOF) {
-
-        if (is_escaped) {
-            ADD_BUF(buf, i, c);
-            is_escaped = false;
-            continue;
-        }
-
-        if (is_whitespace(c))
-            return create_symbol(buf);
-
-        if (is_terminating(c)) {
-            ungetc(c, fp);
-            return create_symbol(buf);
-        }
-
-        if (is_single_escape(c)) {
-            is_escaped = true;
-            continue;
-        }
-
-        ADD_BUF(buf, i, c);
-    }
-
-    return create_symbol(buf);
-
-#undef ADD_BUF
+    return c == '|';
 }
 
 void nreverse(sexp_t **psexp)
@@ -352,31 +341,25 @@ void nreverse(sexp_t **psexp)
     *psexp = prev;
 }
 
-sexp_t *parse_string(FILE *fp)
+sexp_t *read_string(FILE *fp, char c)
 {
 #define ADD_BUF(_buf, _i, _c) do { \
         _buf[_i++] = _c; \
         if (_i == 256) { \
-            fprintf(stderr, "Too long token: %s...\n", _buf); \
+            fprintf(stderr, "Too long string: %s...\n", _buf); \
             exit(-1); \
         } \
     } while(0)
 
     char buf[256] = {0};
     int i = 0;
-    char c;
-    bool is_escaped = false;
 
-    while ((c=fgetc(fp)) != EOF) {
-
-        if (is_escaped) {
-            ADD_BUF(buf, i, c);
-            is_escaped = false;
-            continue;
-        }
+    while ((c = fgetc(fp)) != EOF) {
 
         if (is_single_escape(c)) {
-            is_escaped = true;
+            if ((c = fgetc(fp)) == EOF)
+                END_OF_FILE;
+            ADD_BUF(buf, i, c);
             continue;
         }
 
@@ -386,71 +369,157 @@ sexp_t *parse_string(FILE *fp)
         ADD_BUF(buf, i, c);
     }
 
-    fprintf(stderr, "End of file.\n");
-    exit(-1);
+    END_OF_FILE;
 
-#undef ADD_BUF    
+#undef ADD_BUF
 }
 
-sexp_t *parse_list(FILE *fp)
+sexp_t *read_list(FILE *fp, char c)
 {
-    sexp_t *list = create_nil();
-    char c;
+    sexp_t *list = create_nil();    
 
-    while ((c=fgetc(fp)) != EOF) {
+    while ((c = fgetc(fp)) != EOF) {
 
         if (is_whitespace(c))
             continue;
-
-        if (c == '(') {
-            list = create_pair(parse_list(fp), list);
-            continue;
-        }
 
         if (c == ')') {
             nreverse(&list);
             return list;
         }
 
-        if (c == '"') {
-            list = create_pair(parse_string(fp), list);
-            continue;
-        }
+        if (c == '.')
+            NOT_IMPLEMENTED;
 
         ungetc(c, fp);
-        list = create_pair(parse_symbol(fp), list);
+        list = create_pair(read(fp), list);
     }
 
-    fprintf(stderr, "End of file.\n");
-    exit(-1);
+    END_OF_FILE;
 }
 
-sexp_t *parse(FILE *fp)
+sexp_t *read(FILE *fp)
 {
+#define ADD_BUF(_buf, _i, _c) do { \
+        _buf[_i++] = _c; \
+        if (_i == 256) { \
+            fprintf(stderr, "Too long symbol: %s...\n", _buf); \
+            exit(-1); \
+        } \
+    } while(0)
+
+    char buf[256] = {0};
+    int i = 0;
     char c;
 
-    while ((c=fgetc(fp)) != EOF) {
+step1:
+    if ((c = fgetc(fp)) == EOF)
+        END_OF_FILE;
 
-        if (is_whitespace(c))
-            continue;
+step2:
+    if (is_invalid_character(c))
+        READER_ERROR;
 
-        if (c == '(')
-            return parse_list(fp);
+step3:
+    if (is_whitespace(c))
+        goto step1;
 
-        if (c == ')') {
-            fprintf(stderr, "Unmatched close parenthesis.\n");
-            exit(-1);
-        }
+step4:
+    if (is_macro_character(c)) {
 
         if (c == '"')
-            return parse_string(fp);
+            return read_string(fp, c);
 
-        ungetc(c, fp);
-        return parse_symbol(fp);
+        if (c == '#')
+            NOT_IMPLEMENTED;
+
+        if (c == '\'')
+            NOT_IMPLEMENTED;
+
+        if (c == '(')
+            return read_list(fp, c);
+
+        if (c == ')')
+            UNMATCHED_CLOSE_PARENTHESIS;
+
+        if (c == ',')
+            NOT_IMPLEMENTED;
+
+        if (c == ';')
+            NOT_IMPLEMENTED;
+
+        if (c == '|')
+            NOT_IMPLEMENTED;
+
+        MUST_NOT_BE_REACHED;
     }
 
-    return create_nil();
+step5:
+    if (is_single_escape(c)) {
+        if ((c = fgetc(fp)) == EOF)
+            END_OF_FILE;
+        ADD_BUF(buf, i, c);
+        goto step8;
+    }
+
+step6:
+    if (is_multi_escape(c))
+        NOT_IMPLEMENTED;
+
+step7:
+    // constituent
+    ADD_BUF(buf, i, c);
+    goto step8;
+
+step8:
+    if ((c = fgetc(fp)) == EOF)
+        goto step10;
+    
+    if (is_non_terminating(c)) {
+        ADD_BUF(buf, i, c);
+        goto step8;
+    }
+
+    if (is_single_escape(c)) {
+        if ((c = fgetc(fp)) == EOF)
+            END_OF_FILE;
+        ADD_BUF(buf, i, c);
+        goto step8;
+    }
+
+    if (is_multi_escape(c))
+        NOT_IMPLEMENTED;
+
+    if (is_invalid_character(c))
+        READER_ERROR;
+        
+    if (is_terminating(c)) {
+        ungetc(c, fp);
+        goto step10;
+    }
+
+    if (is_whitespace(c))
+        goto step10;
+
+    // constituent
+    ADD_BUF(buf, i, c);
+    goto step8;
+
+step9:
+    NOT_IMPLEMENTED;
+
+step10:
+    return create_symbol(buf);
+
+#undef ADD_BUF
 }
+
+#undef MUST_NOT_BE_REACHED
+#undef UNMATCHED_CLOSE_PARENTHESIS
+#undef READER_ERROR
+#undef NOT_IMPLEMENTED
+#undef END_OF_FILE
+#undef ERROR
 
 
 /*
@@ -462,7 +531,7 @@ int main()
     const char *code = " (ab\\(c de(f g) \"hi\\\"j\")";
     FILE *fp = fmemopen((void *)code, strlen(code), "r");
 
-    sexp_t *sexp = parse(fp);
+    sexp_t *sexp = read(fp);
 
     print_sexp(sexp);
     printf("\n");
