@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef __APPLE__
+    #include "fmemopen/fmemopen.h"
+#endif
+
 
 /*
  * bool
@@ -13,53 +17,6 @@ enum {
     true  = 1,
     false = 0
 };
-
-
-/*
- * reader
- */
-
-typedef struct {
-    const char *str;
-    const char *p;
-} reader_t;
-
-// Stack allocation interface.
-void init_reader(reader_t *reader, const char *str)
-{
-    reader->str = str;
-    reader->p = str;
-}
-
-// Heap allocation interface.
-reader_t *create_reader(const char *str)
-{
-    reader_t *reader = (reader_t *)malloc(sizeof(reader_t));
-    if (!reader) exit(-1);
-
-    reader->str = str;
-    reader->p = str;
-
-    return reader;
-}
-
-void destroy_reader(reader_t *reader)
-{
-    free(reader);
-}
-
-char reader_head(reader_t *reader)
-{
-    return *reader->p;
-}
-
-char reader_next(reader_t *reader)
-{
-    if (*reader->p)
-        return *reader->p++;
-    else
-        return *reader->p;
-}
 
 
 /*
@@ -331,7 +288,7 @@ bool is_single_escape(unsigned char c)
     return c == '\\';
 }
 
-sexp_t *parse_symbol(reader_t *reader)
+sexp_t *parse_symbol(FILE *fp)
 {
 #define ADD_BUF(_buf, _i, _c) do { \
         _buf[_i++] = _c; \
@@ -346,11 +303,10 @@ sexp_t *parse_symbol(reader_t *reader)
     char c;
     bool is_escaped = false;
 
-    while ((c=reader_head(reader))) {
+    while ((c=fgetc(fp)) != EOF) {
 
         if (is_escaped) {
             ADD_BUF(buf, i, c);
-            reader_next(reader);
             is_escaped = false;
             continue;
         }
@@ -358,17 +314,17 @@ sexp_t *parse_symbol(reader_t *reader)
         if (is_whitespace(c))
             return create_symbol(buf);
 
-        if (is_terminating(c))
+        if (is_terminating(c)) {
+            ungetc(c, fp);
             return create_symbol(buf);
+        }
 
         if (is_single_escape(c)) {
-            reader_next(reader);
             is_escaped = true;
             continue;
         }
 
         ADD_BUF(buf, i, c);
-        reader_next(reader);
     }
 
     return create_symbol(buf);
@@ -396,7 +352,7 @@ void nreverse(sexp_t **psexp)
     *psexp = prev;
 }
 
-sexp_t *parse_string(reader_t *reader)
+sexp_t *parse_string(FILE *fp)
 {
 #define ADD_BUF(_buf, _i, _c) do { \
         _buf[_i++] = _c; \
@@ -411,28 +367,23 @@ sexp_t *parse_string(reader_t *reader)
     char c;
     bool is_escaped = false;
 
-    while ((c=reader_head(reader))) {
+    while ((c=fgetc(fp)) != EOF) {
 
         if (is_escaped) {
             ADD_BUF(buf, i, c);
-            reader_next(reader);
             is_escaped = false;
             continue;
         }
 
         if (is_single_escape(c)) {
-            reader_next(reader);
             is_escaped = true;
             continue;
         }
 
-        if (c == '"') {
-            reader_next(reader);
+        if (c == '"')
             return create_string(buf);
-        }
 
         ADD_BUF(buf, i, c);
-        reader_next(reader);
     }
 
     fprintf(stderr, "End of file.\n");
@@ -441,70 +392,61 @@ sexp_t *parse_string(reader_t *reader)
 #undef ADD_BUF    
 }
 
-sexp_t *parse_list(reader_t *reader)
+sexp_t *parse_list(FILE *fp)
 {
     sexp_t *list = create_nil();
     char c;
 
-    while ((c=reader_head(reader))) {
+    while ((c=fgetc(fp)) != EOF) {
 
-        if (is_whitespace(c)) {
-            reader_next(reader);
+        if (is_whitespace(c))
             continue;
-        }
 
         if (c == '(') {
-            reader_next(reader);
-            list = create_pair(parse_list(reader), list);
+            list = create_pair(parse_list(fp), list);
             continue;
         }
 
         if (c == ')') {
-            reader_next(reader);
             nreverse(&list);
             return list;
         }
 
         if (c == '"') {
-            reader_next(reader);
-            list = create_pair(parse_string(reader), list);
+            list = create_pair(parse_string(fp), list);
             continue;
         }
 
-        list = create_pair(parse_symbol(reader), list);
+        ungetc(c, fp);
+        list = create_pair(parse_symbol(fp), list);
     }
 
     fprintf(stderr, "End of file.\n");
     exit(-1);
 }
 
-sexp_t *parse(reader_t *reader)
+sexp_t *parse(FILE *fp)
 {
     char c;
 
-    while ((c=reader_head(reader))) {
+    while ((c=fgetc(fp)) != EOF) {
 
-        if (is_whitespace(c)) {
-            reader_next(reader);
+        if (is_whitespace(c))
             continue;
-        }
 
-        if (c == '(') {
-            reader_next(reader);
-            return parse_list(reader);
-        }
+        if (c == '(')
+            return parse_list(fp);
 
         if (c == ')') {
             fprintf(stderr, "Unmatched close parenthesis.\n");
             exit(-1);
         }
 
-        if (c == '"') {
-            reader_next(reader);
-            return parse_string(reader);
-        }
+        if (c == '"')
+            return parse_string(fp);
 
-        return parse_symbol(reader);
+        ungetc(c, fp);
+        return parse_symbol(fp);
     }
 
     return create_nil();
@@ -517,16 +459,18 @@ sexp_t *parse(reader_t *reader)
 
 int main()
 {
-    reader_t reader;
-    init_reader(&reader, " (ab\\(c de (f g) \"hi\\\"j\")");
+    const char *code = " (ab\\(c de(f g) \"hi\\\"j\")";
+    FILE *fp = fmemopen((void *)code, strlen(code), "r");
 
-    sexp_t *sexp = parse(&reader);
+    sexp_t *sexp = parse(fp);
 
     print_sexp(sexp);
     printf("\n");
     
     destroy_sexp(sexp);
     sexp = NULL;
+
+    fclose(fp);
 
     return 0;
 }
