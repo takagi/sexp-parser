@@ -24,10 +24,11 @@ enum {
  */
 
 enum {
-  TYPE_NIL    = 1,
-  TYPE_SYMBOL = 2,
-  TYPE_STRING = 3,
-  TYPE_PAIR   = 4
+  TYPE_NIL     = 1,
+  TYPE_SYMBOL  = 2,
+  TYPE_STRING  = 3,
+  TYPE_INTEGER = 4,
+  TYPE_PAIR    = 5
 };
 
 typedef struct {
@@ -121,6 +122,47 @@ void destroy_string(string_t *string)
 void print_string(string_t *string)
 {
     printf("\"%s\"", string->str);
+}
+
+
+/*
+ * integer
+ */
+
+typedef struct {
+    unsigned char tt;
+    int value;
+} integer_t;
+
+bool is_integer(sexp_t *sexp)
+{
+    return sexp->tt == TYPE_INTEGER;
+}
+
+int integer_value(integer_t *integer)
+{
+    return integer->value;
+}
+
+sexp_t *create_integer(const int value)
+{
+    integer_t *integer = (integer_t *)malloc(sizeof(integer_t));
+    if (!integer) exit(-1);
+
+    integer->tt = TYPE_INTEGER;
+    integer->value = value;
+
+    return (sexp_t *)integer;
+}
+
+void destroy_integer(integer_t *integer)
+{
+    free(integer);
+}
+
+void print_integer(integer_t *integer)
+{
+    printf("%d", integer->value);
 }
 
 
@@ -237,6 +279,9 @@ void destroy_sexp(sexp_t *sexp)
     case TYPE_STRING:
         destroy_string((string_t *)sexp);
         return;
+    case TYPE_INTEGER:
+        destroy_integer((integer_t *)sexp);
+        return;
     case TYPE_PAIR:
         destroy_pair((pair_t *)sexp);
         return;
@@ -257,6 +302,9 @@ void print_sexp(sexp_t *sexp)
         return;
     case TYPE_STRING:
         print_string((string_t *)sexp);
+        return;
+    case TYPE_INTEGER:
+        print_integer((integer_t *)sexp);
         return;
     case TYPE_PAIR:
         print_pair((pair_t *)sexp);
@@ -398,6 +446,35 @@ sexp_t *read_list(FILE *fp, char c)
     END_OF_FILE;
 }
 
+bool integer(int *result, const char *str)
+{
+    int i = 0;
+    int sign = 1;
+
+    if (str[i] == '+')
+        i++;
+    if (str[i] == '-') {
+        sign = -1;
+        i++;
+    }
+    if ('0' <= str[i] && str[i] <= '9') {
+        *result += str[i] - 0x30;
+        i++;
+    } else
+        return false;
+begin:
+    if ('0' <= str[i] && str[i] <= '9') {
+        // No overflow check.
+        *result *= 10;
+        *result += str[i] - 0x30;
+        i++;
+        goto begin;
+    } else if (str[i] == '\0')
+        return true;
+    else
+        return false;
+}
+
 sexp_t *read(FILE *fp)
 {
 #define ADD_BUF(_buf, _i, _c) do { \
@@ -411,6 +488,7 @@ sexp_t *read(FILE *fp)
     char buf[256] = {0};
     int i = 0;
     char c;
+    int int_value;
 
 step1:
     if ((c = fgetc(fp)) == EOF)
@@ -509,6 +587,9 @@ step9:
     NOT_IMPLEMENTED;
 
 step10:
+    if (integer(&int_value, buf))
+        return create_integer(int_value);
+
     return create_symbol(buf);
 
 #undef ADD_BUF
@@ -528,7 +609,7 @@ step10:
 
 int main()
 {
-    const char *code = " (ab\\(c de(f g) \"hi\\\"j\")";
+    const char *code = " (ab\\(c 123 de(f g) \"hi\\\"j\")";
     FILE *fp = fmemopen((void *)code, strlen(code), "r");
 
     sexp_t *sexp = read(fp);
